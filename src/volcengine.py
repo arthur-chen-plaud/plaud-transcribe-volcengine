@@ -9,6 +9,8 @@ from loguru import logger
 from config import (
     VOLCENGINE_DEFAULT_AUDIO_FORMAT,
     VOLCENGINE_HTTP_TIMEOUT,
+    VOLCENGINE_MOCK_MODE,
+    VOLCENGINE_MOCK_TEXT,
     VOLCENGINE_MODEL_NAME,
     VOLCENGINE_MODEL_VERSION,
     VOLCENGINE_POLL_INTERVAL,
@@ -280,7 +282,30 @@ def convert_volcengine_response(res):
     return segments
 
 
+def mock_trans_req(task_id, req: TranscribeRequest):
+    logger.info(f"volcengine mock trans_req, task_id: {task_id}, file_url: {req.file_url}")
+    words = []
+    cursor = 0
+    for token in VOLCENGINE_MOCK_TEXT.split():
+        duration = max(len(token) * 80, 160)
+        words.append({"text": token, "offset": cursor, "duration": duration})
+        cursor += duration
+
+    segment = {
+        "text": VOLCENGINE_MOCK_TEXT,
+        "offset": 0,
+        "duration": max(cursor, 1000),
+        "words": words,
+    }
+    if req.diarization:
+        segment["speaker"] = "SPEAKER_00"
+    return TranscribeResponse(status="success", segments=[segment])
+
+
 def warmUp():
+    if VOLCENGINE_MOCK_MODE:
+        logger.info("volcengine warmUp skipped in mock mode")
+        return
     if not VOLCENGINE_WARMUP_URL:
         logger.info("volcengine warmUp skipped, VOLCENGINE_WARMUP_URL is empty")
         return
@@ -296,6 +321,9 @@ def warmUp():
 
 def trans_req(task_id, req: TranscribeRequest):
     logger.info(f"volcengine trans_req start, task_id: {task_id}, file_url: {req.file_url}")
+    if VOLCENGINE_MOCK_MODE:
+        return mock_trans_req(task_id, req)
+
     credentials = get_volcengine_credentials()
     if credentials is None:
         logger.error(f"Failed to get volcengine credentials, task_id: {task_id}")

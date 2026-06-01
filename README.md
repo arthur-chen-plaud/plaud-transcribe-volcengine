@@ -42,6 +42,8 @@
 - `VOLCENGINE_POLL_INTERVAL`：默认 `5` 秒
 - `VOLCENGINE_SUBMIT_RETRY_DELAYS`：submit 重试间隔，默认 `0,2,10`
 - `VOLCENGINE_WARMUP_URL`：可选，配置后启动时提交一次 warmup 音频
+- `VOLCENGINE_MOCK_MODE`：设为 `true` 时跳过火山 API，直接返回 mock 结果
+- `VOLCENGINE_MOCK_TEXT`：mock 模式返回文本，默认 `mock volcengine asr result`
 
 单个转写任务的 submit 和 query 会复用同一组火山凭证；如果 Secrets Manager 配置多组凭证，worker 只在不同任务之间轮转凭证。
 

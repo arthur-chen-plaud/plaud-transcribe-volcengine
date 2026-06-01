@@ -3,7 +3,7 @@ import time
 from celery import Celery, signals
 from loguru import logger
 
-from config import BROKER_URL, HEALTH_PORT, QUEUE_NAME, RESULT_BACKEND, TASK_NAME
+from config import BROKER_URL, HEALTH_PORT, QUEUE_NAME, RESULT_BACKEND, TASK_NAME, VOLCENGINE_MOCK_MODE
 from src.datas import TranscribeRequest
 from src.health_server import start_health_server
 from src.secret_keys import start_volcengine_secretmanager_monitor
@@ -32,7 +32,10 @@ celery_app.conf.update(
 def worker_init_handler(**kwargs):
     logger.info("volcengine worker_init signal received")
     start_health_server(port=HEALTH_PORT)
-    start_volcengine_secretmanager_monitor()
+    if VOLCENGINE_MOCK_MODE:
+        logger.info("volcengine credential monitor skipped in mock mode")
+    else:
+        start_volcengine_secretmanager_monitor()
     warmUp()
     logger.info("volcengine worker_init signal end")
 
