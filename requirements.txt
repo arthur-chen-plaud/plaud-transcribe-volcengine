@@ -1,0 +1,6 @@
+celery==5.5.3
+redis==6.4.0
+pydantic==2.11.9
+loguru==0.7.3
+boto3>=1.35.49
+requests>=2.31.0
