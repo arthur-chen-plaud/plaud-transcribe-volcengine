@@ -89,6 +89,67 @@ docker build -t celery_volcengine:latest .
 
 脚本只会把宿主机当前环境中已经设置的变量转发到容器；Docker 不会自动继承宿主机所有环境变量，也不会和宿主机环境变量互相污染。
 
+## 服务器部署
+
+部署前需要准备：
+
+- 一台能运行 Docker 的服务器，并能访问 Redis。
+- 一个 Celery broker/result backend。可以使用同一个 Redis，也可以分开配置。
+- 火山引擎 ASR 凭证，推荐通过环境变量或 Secrets Manager 注入。
+- 可被火山引擎访问的音频 URL。worker 不负责上传音频，只消费请求里的 `file_url`。
+
+推荐使用独立队列，避免和其他 ASR worker 抢同一个 Redis queue。例如：
+
+```bash
+export BROKER_URL=redis://<redis-host>:6379/0
+export RESULT_BACKEND=redis://<redis-host>:6379/0
+export TASK_NAME=plaud-transcribe-volcengine
+export QUEUE_NAME=plaud-transcribe-volcengine
+export WORKER_NAME=volcengine-transcribe-prod
+export MAX_NUM_SEQS=8
+export LOG_TO_FILE=true
+```
+
+`VOLCENGINE_API_KEY` 也需要在当前 shell、部署系统或 Secrets Manager 中存在，但不要把 key 明文写进命令历史、代码、镜像或 README。
+
+然后启动：
+
+```bash
+docker build -t celery_volcengine:latest .
+./start_docker.sh
+```
+
+健康检查：
+
+```bash
+curl http://127.0.0.1:8082/health
+```
+
+客户端需要使用同一个 Redis 和同一个任务名：
+
+```python
+from celery import Celery
+
+BROKER_URL = "redis://<redis-host>:6379/0"
+RESULT_BACKEND = "redis://<redis-host>:6379/0"
+TASK_NAME = "plaud-transcribe-volcengine"
+
+app = Celery("volcengine-client", broker=BROKER_URL, backend=RESULT_BACKEND)
+res = app.send_task(
+    TASK_NAME,
+    args=[{
+        "file_url": "https://example.com/audio.wav",
+        "language": "auto",
+        "request_prompt": "",
+        "phrases": [],
+        "diarization": False,
+    }],
+)
+print(res.get(timeout=180))
+```
+
+如果服务器上已经有其他 worker，例如 `plaud-asr-transcribe-qwen3omni`，不要把本 worker 配成相同的 `TASK_NAME/QUEUE_NAME`。多个 worker 监听同一个队列时，任务会被其中任意一个 worker 消费，结果会变得不可控。
+
 ## 本地开发
 
 本地开发也使用环境变量。确认 Redis、火山凭证等变量已经在当前 shell 中存在后，可以直接启动：
