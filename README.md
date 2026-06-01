@@ -40,7 +40,10 @@
 - `VOLCENGINE_SECRET_NAME`：可选，配置后从 AWS Secrets Manager 读取凭证
 - `VOLCENGINE_QUERY_TIMEOUT`：默认 `540` 秒
 - `VOLCENGINE_POLL_INTERVAL`：默认 `5` 秒
+- `VOLCENGINE_SUBMIT_RETRY_DELAYS`：submit 重试间隔，默认 `0,2,10`
 - `VOLCENGINE_WARMUP_URL`：可选，配置后启动时提交一次 warmup 音频
+
+单个转写任务的 submit 和 query 会复用同一组火山凭证；如果 Secrets Manager 配置多组凭证，worker 只在不同任务之间轮转凭证。
 
 Secrets Manager 内容支持对象或对象数组，字段名支持：
 

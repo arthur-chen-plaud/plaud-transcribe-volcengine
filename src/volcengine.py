@@ -1,5 +1,6 @@
 import json
 import time
+import uuid
 from urllib.parse import urlparse
 
 import requests
@@ -15,6 +16,7 @@ from config import (
     VOLCENGINE_QUERY_URL,
     VOLCENGINE_RESOURCE_ID,
     VOLCENGINE_SSD_VERSION,
+    VOLCENGINE_SUBMIT_RETRY_DELAYS,
     VOLCENGINE_SUBMIT_URL,
     VOLCENGINE_WARMUP_URL,
 )
@@ -23,6 +25,7 @@ from src.secret_keys import get_volcengine_credentials
 
 
 SUCCESS_CODE = "20000000"
+SILENCE_CODE = "20000003"
 PENDING_CODES = {"20000001", "20000002"}
 SUPPORTED_AUDIO_FORMATS = {"raw", "wav", "mp3", "ogg", "m4a", "flac", "aac", "amr", "pcm"}
 
@@ -43,7 +46,7 @@ def _logid(response):
     return _header_value(response, "X-Tt-Logid")
 
 
-def _build_headers(task_id, credentials, include_sequence=True, logid=""):
+def _build_headers(task_id, credentials, include_sequence=True):
     headers = {
         "Content-Type": "application/json",
         "X-Api-Resource-Id": VOLCENGINE_RESOURCE_ID,
@@ -51,8 +54,6 @@ def _build_headers(task_id, credentials, include_sequence=True, logid=""):
     }
     if include_sequence:
         headers["X-Api-Sequence"] = "-1"
-    if logid:
-        headers["X-Tt-Logid"] = logid
 
     if credentials.get("api_key"):
         headers["X-Api-Key"] = credentials["api_key"]
@@ -130,45 +131,55 @@ def _infer_audio_format(file_url):
     return ""
 
 
-def submit_task(task_id, req):
-    credentials = get_volcengine_credentials()
-    if credentials is None:
-        logger.error(f"Failed to get volcengine credentials, task_id: {task_id}")
-        return None
+def _submit_retry_delays():
+    delays = []
+    for raw_delay in VOLCENGINE_SUBMIT_RETRY_DELAYS.split(","):
+        raw_delay = raw_delay.strip()
+        if not raw_delay:
+            continue
+        try:
+            delays.append(float(raw_delay))
+        except ValueError:
+            logger.error(f"invalid submit retry delay ignored: {raw_delay}")
+    return delays or [0]
 
+
+def submit_task(task_id, req, credentials):
     headers = _build_headers(task_id, credentials, include_sequence=True)
     body = _build_request(req, credentials)
-    try:
-        response = requests.post(
-            VOLCENGINE_SUBMIT_URL,
-            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-            headers=headers,
-            timeout=VOLCENGINE_HTTP_TIMEOUT,
+    retry_delays = _submit_retry_delays()
+    for attempt, delay in enumerate(retry_delays, start=1):
+        if delay > 0:
+            time.sleep(delay)
+        try:
+            response = requests.post(
+                VOLCENGINE_SUBMIT_URL,
+                data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                headers=headers,
+                timeout=VOLCENGINE_HTTP_TIMEOUT,
+            )
+        except Exception as e:
+            logger.error(f"volcengine submit error: {e}, task_id: {task_id}, attempt: {attempt}")
+            continue
+
+        code = _status(response)
+        if code == SUCCESS_CODE:
+            logger.info(f"volcengine submit success, task_id: {task_id}, logid: {_logid(response)}")
+            return True
+
+        logger.error(
+            f"volcengine submit failed, task_id: {task_id}, attempt: {attempt}, "
+            f"http_status: {response.status_code}, code: {code}, "
+            f"message: {_message(response)}, response: {response.text}"
         )
-    except Exception as e:
-        logger.error(f"volcengine submit error: {e}, task_id: {task_id}")
-        return None
+        if response.status_code < 500 and code:
+            break
 
-    code = _status(response)
-    if code == SUCCESS_CODE:
-        logid = _logid(response)
-        logger.info(f"volcengine submit success, task_id: {task_id}, logid: {logid}")
-        return logid
-
-    logger.error(
-        f"volcengine submit failed, task_id: {task_id}, code: {code}, "
-        f"message: {_message(response)}, response: {response.text}"
-    )
-    return None
+    return False
 
 
-def query_task(task_id, logid):
-    credentials = get_volcengine_credentials()
-    if credentials is None:
-        logger.error(f"Failed to get volcengine credentials, task_id: {task_id}")
-        return None, "credential_error"
-
-    headers = _build_headers(task_id, credentials, include_sequence=False, logid=logid)
+def query_task(task_id, credentials):
+    headers = _build_headers(task_id, credentials, include_sequence=False)
     deadline = time.time() + VOLCENGINE_QUERY_TIMEOUT
     while time.time() < deadline:
         try:
@@ -194,6 +205,9 @@ def query_task(task_id, logid):
             except json.JSONDecodeError as e:
                 logger.error(f"volcengine query json parse error: {e}, task_id: {task_id}")
                 return None, "json_error"
+        if code == SILENCE_CODE:
+            logger.info(f"volcengine query returned silence audio, task_id: {task_id}")
+            return {"result": {"utterances": []}}, "success"
         if code not in PENDING_CODES:
             logger.error(
                 f"volcengine query failed, task_id: {task_id}, code: {code}, "
@@ -273,7 +287,7 @@ def warmUp():
 
     logger.info("volcengine warmUp start")
     req = TranscribeRequest(file_url=VOLCENGINE_WARMUP_URL, language="auto")
-    res = trans_req("warmup", req)
+    res = trans_req(str(uuid.uuid4()), req)
     if res.status == "success":
         logger.info("volcengine warmUp success")
     else:
@@ -282,11 +296,16 @@ def warmUp():
 
 def trans_req(task_id, req: TranscribeRequest):
     logger.info(f"volcengine trans_req start, task_id: {task_id}, file_url: {req.file_url}")
-    logid = submit_task(task_id, req)
-    if not logid:
+    credentials = get_volcengine_credentials()
+    if credentials is None:
+        logger.error(f"Failed to get volcengine credentials, task_id: {task_id}")
+        return TranscribeResponse(status="credential_error", segments=[])
+
+    submitted = submit_task(task_id, req, credentials)
+    if not submitted:
         return TranscribeResponse(status="volcengine_submit_error", segments=[])
 
-    res, status = query_task(task_id, logid)
+    res, status = query_task(task_id, credentials)
     if status != "success" or res is None:
         return TranscribeResponse(status=status, segments=[])
 
