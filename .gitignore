@@ -9,4 +9,5 @@ venv/
 .vscode/
 logs/
 *.log
+test_outputs/
 .DS_Store
