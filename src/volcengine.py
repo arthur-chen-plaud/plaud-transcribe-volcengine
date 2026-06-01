@@ -46,6 +46,13 @@ def _logid(response):
     return _header_value(response, "X-Tt-Logid")
 
 
+def _safe_url_for_log(file_url):
+    parsed = urlparse(file_url)
+    if not parsed.scheme or not parsed.netloc:
+        return file_url
+    return parsed._replace(query="", fragment="").geturl()
+
+
 def _build_headers(task_id, credentials, include_sequence=True):
     headers = {
         "Content-Type": "application/json",
@@ -295,7 +302,10 @@ def warmUp():
 
 
 def trans_req(task_id, req: TranscribeRequest):
-    logger.info(f"volcengine trans_req start, task_id: {task_id}, file_url: {req.file_url}")
+    logger.info(
+        f"volcengine trans_req start, task_id: {task_id}, "
+        f"file_url: {_safe_url_for_log(req.file_url)}"
+    )
     credentials = get_volcengine_credentials()
     if credentials is None:
         logger.error(f"Failed to get volcengine credentials, task_id: {task_id}")
