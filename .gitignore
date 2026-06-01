@@ -4,6 +4,9 @@ __pycache__/
 .deps/
 .venv/
 venv/
+.claude/
+.idea/
+.vscode/
 logs/
 *.log
 .DS_Store

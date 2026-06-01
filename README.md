@@ -70,7 +70,7 @@ Secrets Manager 内容支持对象或对象数组，字段名支持：
 
 ```bash
 pip install -r requirements.txt
-VOLCENGINE_APP_KEY=xxx VOLCENGINE_ACCESS_KEY=yyy python run_celery.py
+VOLCENGINE_API_KEY=xxx python run_celery.py
 ```
 
 ## Docker
@@ -82,7 +82,6 @@ docker run --rm \
   -p 8082:8080 \
   -e BROKER_URL="redis://redis:6379/0" \
   -e RESULT_BACKEND="redis://redis:6379/0" \
-  -e VOLCENGINE_APP_KEY="xxx" \
-  -e VOLCENGINE_ACCESS_KEY="yyy" \
+  -e VOLCENGINE_API_KEY="xxx" \
   celery_volcengine:latest
 ```
