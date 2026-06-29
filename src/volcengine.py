@@ -89,14 +89,46 @@ def _build_corpus(req):
             )
         }
     return None
+import base64
+def encode_base64_content(wav_io: bytes) -> str:
+    """Encode content retrieved from a local file to base64 format."""
 
+    result = base64.b64encode(wav_io).decode('utf-8')
+    return result
+
+def get_audio_file(file_url):
+    max_try = 3
+    for i in range(max_try+1):
+        if i >= max_try:
+            return None,0
+        time.sleep(i*5)
+        try:
+            response = requests.get(file_url, timeout=60)
+        except Exception as e:
+            logger.error(f"download file failed try_{i}, url: {file_url}, error: {e}")
+            continue
+        if response.status_code != 200:
+            logger.error(f"download file failed, try_{i} status: ${response.status_code}, url: {file_url}")
+            continue
+
+        logger.info(f"download_file_success, url: {file_url}")
+        return encode_base64_content(response.content)
+        #audio, _ = librosa.load(io.BytesIO(response.content), sr=SAMPLE_RATE)
+        #duration = int(len(audio) / SAMPLE_RATE * 1000)
+        #if duration > 30000:
+        #    logger.info(f"audio too long: {duration}, truncate to 30s")
+        #    audio = audio[:int(30*SAMPLE_RATE)]
+        #    duration = 30000
+        #return audio, duration
 
 def _build_request(req, credentials):
     uid = credentials.get("app_key") or credentials.get("api_key") or "volcengine-asr"
-    audio = {"url": req.file_url}
-    audio_format = _infer_audio_format(req.file_url)
-    if audio_format:
-        audio["format"] = audio_format
+    #audio = {"url": req.file_url}
+    #audio_format = _infer_audio_format(req.file_url)
+    #if audio_format:
+    #    audio["format"] = audio_format
+    audio={}
+    audio["data"]=get_audio_file(req.file_url)
     if req.language and req.language != "auto":
         audio["language"] = req.language
 
